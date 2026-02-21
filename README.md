@@ -1,0 +1,1 @@
+# czk-aed-kalkulacka-5
