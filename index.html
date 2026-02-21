@@ -1,1 +1,182 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CZK → AED Invest Dashboard v5 PRO+</title>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+
+<style>
+body{margin:0;padding:40px;background:#f2f4f7;font-family:-apple-system,BlinkMacSystemFont,sans-serif;}
+.container{max-width:1100px;margin:auto;background:white;padding:40px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.08);}
+h1{margin:0 0 5px 0;font-size:34px;transition:.3s;}
+.flashUp{color:#16a34a;}
+.flashDown{color:#dc2626;}
+.zone{margin-top:20px;padding:15px;border-radius:12px;font-weight:700;font-size:18px;text-align:center;}
+.green{background:#dcfce7;color:#166534;}
+.yellow{background:#fef9c3;color:#854d0e;}
+.red{background:#fee2e2;color:#991b1b;}
+.subinfo{font-size:14px;color:#6b7280;margin-bottom:15px;}
+.stats{display:flex;gap:40px;margin-bottom:20px;font-weight:600;}
+input{padding:8px;border-radius:6px;border:1px solid #ddd;margin-right:10px;}
+button{padding:10px 16px;border:none;border-radius:8px;background:#2563eb;color:white;font-weight:600;cursor:pointer;}
+.up{color:#16a34a;}
+.down{color:#dc2626;}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<h1 id="liveRate">Načítá se live kurz...</h1>
+<div class="subinfo" id="dailyInfo"></div>
+<div id="zoneBox" class="zone"></div>
+
+<div class="stats">
+<div>Změna (30d): <span id="change"></span></div>
+<div>Min (30d): <span id="min"></span></div>
+<div>Max (30d): <span id="max"></span></div>
+</div>
+
+<canvas id="chart"></canvas>
+
+<div style="margin-top:30px;">
+<input type="number" step="0.0001" id="alertValue" placeholder="Zadej cílový kurz">
+<button onclick="setAlert()">Uložit alert</button>
+<span id="alertStatus"></span>
+</div>
+
+</div>
+
+<script>
+
+emailjs.init("IBoBc4YrsbAyOMkHh");
+
+const API_KEY="QE7EVYZZBM5J6VUR";
+let historyData={}, liveRate=null, lastClose=null, chart;
+
+// ===== HISTORIE =====
+async function fetchDaily(){
+const url=`https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=CZK&to_symbol=AED&outputsize=compact&apikey=${API_KEY}`;
+const res=await fetch(url);
+const data=await res.json();
+if(!data["Time Series FX (Daily)"]) return;
+
+historyData=data["Time Series FX (Daily)"];
+const dates=Object.keys(historyData).sort();
+const latest=dates[dates.length-1];
+lastClose=parseFloat(historyData[latest]["4. close"]);
+
+document.getElementById("dailyInfo").innerText=
+"Poslední close: "+latest+" | "+lastClose.toFixed(5);
+
+loadChart(dates.slice(-90));
+updateStats(dates.slice(-30));
+evaluateZone();
+}
+
+// ===== LIVE =====
+async function fetchLive(){
+const url=`https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=CZK&to_currency=AED&apikey=${API_KEY}`;
+const res=await fetch(url);
+const data=await res.json();
+if(!data["Realtime Currency Exchange Rate"]) return;
+
+liveRate=parseFloat(data["Realtime Currency Exchange Rate"]["5. Exchange Rate"]);
+
+document.getElementById("liveRate").innerText=
+"Live kurz: "+liveRate.toFixed(5)+" AED";
+
+evaluateZone();
+checkAlert();
+}
+
+// ===== ZÓNA =====
+function evaluateZone(){
+if(!liveRate||!historyData) return;
+
+const values=Object.values(historyData)
+.slice(-90)
+.map(d=>parseFloat(d["4. close"]));
+
+const min90=Math.min(...values);
+const ma14=values.slice(-14).reduce((a,b)=>a+b,0)/14;
+
+const distMin=((liveRate-min90)/min90)*100;
+const distMA=((liveRate-ma14)/ma14)*100;
+
+const box=document.getElementById("zoneBox");
+
+if(distMin<=1 && distMA<=0){
+box.className="zone green";
+box.innerText="🟢 SILNÁ NÁKUPNÍ ZÓNA";
+}
+else if(distMin<=3){
+box.className="zone yellow";
+box.innerText="🟡 ZAJÍMAVÁ OBLAST – sledovat";
+}
+else{
+box.className="zone red";
+box.innerText="🔴 SPÍŠE VYČKAT";
+}
+}
+
+// ===== GRAF =====
+function loadChart(dates){
+const values=dates.map(d=>parseFloat(historyData[d]["4. close"]));
+if(chart) chart.destroy();
+chart=new Chart(document.getElementById("chart"),{
+type:"line",
+data:{labels:dates,datasets:[{data:values,tension:0.3,borderWidth:2}]},
+options:{responsive:true,plugins:{legend:{display:false}}}
+});
+}
+
+// ===== STATISTIKY =====
+function updateStats(dates){
+const values=dates.map(d=>parseFloat(historyData[d]["4. close"]));
+const first=values[0];
+const last=values[values.length-1];
+const change=((last-first)/first*100).toFixed(2);
+const min=Math.min(...values).toFixed(5);
+const max=Math.max(...values).toFixed(5);
+
+const el=document.getElementById("change");
+el.innerText=(change>=0?"+":"")+change+" %";
+el.className=change>=0?"up":"down";
+
+document.getElementById("min").innerText=min;
+document.getElementById("max").innerText=max;
+}
+
+// ===== ALERT =====
+function setAlert(){
+const target=parseFloat(document.getElementById("alertValue").value);
+if(!target) return;
+localStorage.setItem("czkAedAlert",target);
+document.getElementById("alertStatus").innerText="Alert uložen.";
+}
+
+function checkAlert(){
+const saved=localStorage.getItem("czkAedAlert");
+if(!saved||!liveRate) return;
+
+if(liveRate>=parseFloat(saved)){
+emailjs.send("service_wex2goh","template_jeypaxq",{
+rate: liveRate.toFixed(5),
+target: saved
+});
+localStorage.removeItem("czkAedAlert");
+}
+}
+
+// ===== START =====
+fetchDaily();
+fetchLive();
+setInterval(fetchLive,60000);
+
+</script>
+</body>
+</html>
