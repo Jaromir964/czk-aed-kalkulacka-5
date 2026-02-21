@@ -2,7 +2,7 @@ name: CZK-AED Auto Monitor
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # každých 15 minut
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,15 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install tools
+        run: sudo apt-get install -y jq bc
+
       - name: Check CZK/AED rate
+        env:
+          TARGET: ${{ secrets.TARGET_RATE }}
         run: |
           RESPONSE=$(curl -s "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=CZK&to_currency=AED&apikey=QE7EVYZZBM5J6VUR")
 
           RATE=$(echo $RESPONSE | jq -r '.["Realtime Currency Exchange Rate"]["5. Exchange Rate"]')
 
           echo "Aktuální kurz: $RATE"
-
-          TARGET=0.1800
+          echo "Cílový kurz: $TARGET"
 
           if (( $(echo "$RATE >= $TARGET" | bc -l) )); then
             echo "Kurz dosažen, odesílám email..."
